@@ -1,6 +1,4 @@
-# import kitti.raw
-# reload(kitti.raw)
-from kitti.raw import load_video, load_stereo_video, load_video_odometry
+from kitti.raw import load_video, load_stereo_video, load_video_odometry, odometry_to_positions
 
 
 def test_load_video(interactive=False):
@@ -47,19 +45,16 @@ def test_load_video_odometry():
 
     dt = 0.1035
 
-    odometry = load_video_odometry(11)
+    odometry = load_video_odometry(11, raw=True)
     t = odometry.T[-1]
     dts = np.diff(t)
     print (t[-1] - t[0]) / (len(t) - 1)
     print dts.mean()
 
-    lat, lon = odometry.T[:2]  # latitude and longitude
-    lat -= lat[0]
-    lon -= lon[0]
-
-    R = 6378137  # Earth's radius in metres
-    y = np.deg2rad(lat) * R
-    x = np.deg2rad(lon) * R
+    positions = odometry_to_positions(odometry)
+    x, y = positions.T[:2]
+    x = x - x[0]
+    y = y - y[0]
 
     vn, ve  = odometry.T[6:8]  # velocity north and east
     x2 = np.cumsum(ve) * dt

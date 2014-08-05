@@ -44,7 +44,26 @@ def get_video_odometry(oxts_path, indices, ext='.txt'):
     times = np.array(times).reshape(-1, 1)
     return np.concatenate([odometry, times], axis=1)
 
-    # return np.hstack([np.array(odometry), np.array(times)])
+
+def odometry_to_positions(odometry):
+    lat, lon, alt = odometry.T[:3]
+
+    R = 6378137  # Earth's radius in metres
+
+    if 0:
+        # convert to Mercator (based on devkit MATLAB code, untested)
+        lat, lon = np.deg2rad(lat), np.deg2rad(lon)
+        scale = np.cos(lat)
+        mx = R * scale * lon
+        my = R * scale * np.log(np.tan(0.5 * (lat + 0.5 * np.pi)))
+    else:
+        # convert to metres
+        lat, lon = np.deg2rad(lat), np.deg2rad(lon)
+        mx = R * lon * np.cos(lat)
+        my = R * lat
+
+    times = odometry.T[-1]
+    return np.vstack([mx, my, alt, times]).T
 
 
 def load_video(drive, **kwargs):
@@ -87,13 +106,13 @@ def load_disp_video(drive, **kwargs):
     return np.asarray(images)
 
 
-def load_video_odometry(drive, **kwargs):
+def load_video_odometry(drive, raw=False, **kwargs):
     drive_dir = get_drive_dir(drive, **kwargs)
-    # data_dir = os.path.join(drive_dir, 'oxts', 'data')
     oxts_dir = os.path.join(drive_dir, 'oxts')
     data_dir = os.path.join(drive_dir, 'oxts', 'data')
     inds = get_inds(data_dir, ext='.txt')
-    return get_video_odometry(oxts_dir, inds)
+    odometry = get_video_odometry(oxts_dir, inds)
+    return odometry if raw else odometry_to_positions(odometry)
 
 
 def animate_video(video, fig=None, ax=None):
