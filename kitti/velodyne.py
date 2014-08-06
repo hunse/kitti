@@ -2,6 +2,15 @@ import os
 
 import numpy as np
 
+from kitti.data import get_drive_dir
+
+image_shape = 375, 1242
+
+
+def get_velodyne_dir(drive, **kwargs):
+    drive_dir = get_drive_dir(drive, **kwargs)
+    return os.path.join(drive_dir, 'velodyne_points', 'data')
+
 
 def read_calib_file(path):
     float_chars = set("0123456789.e+- ")
@@ -20,6 +29,68 @@ def read_calib_file(path):
                     pass  # casting error: data[key] already eq. value, so pass
 
     return data
+
+
+def get_disparity_points(calib_dir, data_dir, frame, color=False):
+
+    cam0, cam1 = (0, 1) if not color else (2, 3)
+
+    # read calibration data
+    cam2cam = read_calib_file(os.path.join(calib_dir, "calib_cam_to_cam.txt"))
+    rigid = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
+
+    Tr_velo2cam = np.eye(4)
+    Tr_velo2cam[:3, :3] = rigid['R'].reshape(3, 3)
+    Tr_velo2cam[:3, 3] = rigid['T']
+
+    R_rect00 = np.eye(4)
+    R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
+
+    def get_cam_transform(cam):
+        P = cam2cam['P_rect_%02d' % cam].reshape(3, 4)
+        return np.dot(P, np.dot(R_rect00, Tr_velo2cam))
+
+    P_velo2img0 = get_cam_transform(cam0)
+    P_velo2img1 = get_cam_transform(cam1)
+
+    # read velodyne points
+    points_path = os.path.join(data_dir, "%010d.bin" % frame)
+    points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
+    points = points[:, :3]  # exclude luminance
+
+    # remove all points behind image plane (approximation)
+    points = points[points[:, 0] >= 5, :]
+
+    # convert points to each camera
+    def project(points, T):
+        dim_norm, dim_proj = T.shape
+
+        # do transformation in homogeneous coordinates
+        if points.shape[1] < dim_proj:
+            points = np.hstack([points, np.ones((points.shape[0], 1))])
+
+        new_points = np.dot(points, T.T)
+
+        # normalize homogeneous coordinates
+        new_points = new_points[:, :dim_norm-1] / new_points[:, [dim_norm-1]]
+        return new_points
+
+    points0 = project(points, P_velo2img0)
+    points1 = project(points, P_velo2img1)
+    diff = points0 - points1
+    assert (np.abs(diff[:, 1]) < 0.5).all()  # assert all y-coordinates close
+
+    points = points0[:, ::-1]  # points in left image, flip to (i, j) format
+    disps = diff[:, 0]
+
+    # take only points that fall in the first image
+    mask = ((points[:, 0] >= 0) & (points[:, 0] <= image_shape[0] - 1) &
+            (points[:, 1] >= 0) & (points[:, 1] <= image_shape[1] - 1) &
+            (disps >= 0) & (disps <= 255))
+
+    points = points[mask]
+    disps = disps[mask]
+    return points, disps
 
 
 def lin_interp(shape, ij_points, values):
@@ -75,112 +146,10 @@ def lstsq_interp(shape, ij_points, values, lamb=1):
     G = scipy.sparse.linalg.LinearOperator(
         (n_pixels, n_pixels), matvec=calcAA, dtype=np.float)
 
-    x0 = lin_interp(shape, ij_points, values)
     # x0 = np.zeros(shape)
+    x0 = lin_interp(shape, ij_points, values)
 
     # x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten(), maxiter=100)
     x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten())
 
     return x.reshape(shape)
-
-
-def make_disparity_image(calib_dir, data_dir, frame):
-
-    cam0 = 0
-    cam1 = 1
-
-    # read calibration data
-    cam2cam = read_calib_file(os.path.join(calib_dir, "calib_cam_to_cam.txt"))
-    rigid = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
-
-    Tr_velo2cam = np.eye(4)
-    Tr_velo2cam[:3, :3] = rigid['R'].reshape(3, 3)
-    Tr_velo2cam[:3, 3] = rigid['T']
-
-
-    R_rect00 = np.eye(4)
-    R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
-    # R[:3, :3] = cam2cam['R_rect_%02d' % cam].reshape(3, 3)
-
-    def get_cam_transform(cam):
-        P = cam2cam['P_rect_%02d' % cam].reshape(3, 4)
-        return np.dot(P, np.dot(R_rect00, Tr_velo2cam))
-
-    P_velo2img0 = get_cam_transform(cam0)
-    P_velo2img1 = get_cam_transform(cam1)
-
-    # read velodyne points
-    points_path = os.path.join(data_dir, "%010d.bin" % frame)
-    points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
-    points = points[:, :3]  # exclude luminance
-
-    # remove all points behind image plane (approximation)
-    points = points[points[:, 0] >= 5, :]
-
-    # convert points to each camera
-    def project(points, T):
-        dim_norm, dim_proj = T.shape
-
-        # do transformation in homogeneous coordinates
-        if points.shape[1] < dim_proj:
-            points = np.hstack([points, np.ones((points.shape[0], 1))])
-
-        new_points = np.dot(points, T.T)
-
-        # normalize homogeneous coordinates
-        new_points = new_points[:, :dim_norm-1] / new_points[:, [dim_norm-1]]
-        return new_points
-
-    points0 = project(points, P_velo2img0)
-    points1 = project(points, P_velo2img1)
-    diff = points0 - points1
-    assert (np.abs(diff[:, 1]) < 1e-3).all()  # assert all y-coordinates close
-
-    # take only points that fall in the first image
-    w, h = 1242, 375
-    mask = ((points0[:, 0] >= 0) & (points0[:, 0] <= w-1) &
-            (points0[:, 1] >= 0) & (points0[:, 1] <= h-1) &
-            (diff[:, 0] >= 0) & (diff[:, 0] <= 255))
-    points0 = points0[mask]
-    diff = diff[mask]
-
-    import matplotlib.pyplot as plt
-    plt.ion()
-
-    if 0:
-        # create sparse disparity image
-        disparity = np.zeros((h, w), dtype=np.uint8)
-        points0 = np.round(points0).astype('int')
-        disps = np.round(diff[:, 0])
-        for [j, i], d in zip(points0, disps):
-            disparity[i, j] = d
-
-        plt.figure(1)
-        plt.clf()
-        plt.imshow(disparity)
-
-    elif 0:
-        # linearly interpolate disparity image
-        disparity = lin_interp((h, w), points0[:, ::-1], diff[:, 0])
-
-        plt.figure(2)
-        plt.clf()
-        plt.imshow(disparity)
-
-    else:
-        # lstsq interpolation of disparity image
-        disparity = lstsq_interp((h, w), np.round(points0[:, ::-1]), diff[:, 0], lamb=1)
-
-        plt.figure(3)
-        plt.clf()
-        plt.imshow(disparity)
-
-
-    return disparity
-
-
-if __name__ == '__main__':
-    calib_dir = '/home/ehunsber/workspace/kitti/data/2011_09_26'
-    data_dir = '/home/ehunsber/workspace/kitti/data/2011_09_26/2011_09_26_drive_0011_sync/velodyne_points/data'
-
-    make_disparity_image(calib_dir, data_dir, 150)

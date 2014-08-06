@@ -4,15 +4,15 @@ import numpy as np
 from kitti.data import get_drive_dir, get_inds
 
 
-def get_video_dir(drive, color=False, right=False, date='2011_09_26'):
-    drive_dir = get_drive_dir(drive, date)
+def get_video_dir(drive, color=False, right=False, **kwargs):
+    drive_dir = get_drive_dir(drive, **kwargs)
     image_dir = 'image_%02d' % (0 + (1 if right else 0) + (2 if color else 0))
     return os.path.join(drive_dir, image_dir, 'data')
 
 
-def get_disp_dir(drive, date='2011_09_26'):
-    return os.path.join(
-        data_dir, date, date + '_drive_%04d_sync' % drive, 'disp', 'data')
+def get_disp_dir(drive, **kwargs):
+    drive_dir = get_drive_dir(drive, **kwargs)
+    return os.path.join(drive_dir, 'disp', 'data')
 
 
 def get_video_images(path, indices, ext='.png'):

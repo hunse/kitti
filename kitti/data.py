@@ -4,6 +4,10 @@ root_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(os.path.dirname(root_dir), 'data')
 
 
+def get_calib_dir(date='2011_09_26'):
+    return os.path.join(data_dir, date)
+
+
 def get_drive_dir(drive, date='2011_09_26'):
     return os.path.join(data_dir, date, date + '_drive_%04d_sync' % drive)
 
