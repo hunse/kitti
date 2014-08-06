@@ -105,8 +105,10 @@ def test_interp(drive=11, frame=0):
     velodyne_dir = get_velodyne_dir(drive)
     points, disps = get_disparity_points(
         calib_dir, velodyne_dir, frame, color=False)
+
     lin_disp = lin_interp(image_shape, points, disps)
-    lstsq_disp = lstsq_interp(image_shape, points, disps)
+    lstsq_disp = lstsq_interp(image_shape, points, disps, lamb=0.5)
+    # lstsq_disp = lstsq_interp(image_shape, points, disps, maxiter=100)
 
     plt.figure()
     plt.clf()

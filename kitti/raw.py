@@ -10,9 +10,9 @@ def get_video_dir(drive, color=False, right=False, **kwargs):
     return os.path.join(drive_dir, image_dir, 'data')
 
 
-def get_disp_dir(drive, **kwargs):
+def get_disp_dir(drive, color=False, **kwargs):
     drive_dir = get_drive_dir(drive, **kwargs)
-    return os.path.join(drive_dir, 'disp', 'data')
+    return os.path.join(drive_dir, 'disp_' + ('23' if color else '01'), 'data')
 
 
 def get_video_images(path, indices, ext='.png'):

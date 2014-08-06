@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 
-from kitti.data import get_drive_dir
+from kitti.data import get_drive_dir, get_calib_dir, get_inds
 
 image_shape = 375, 1242
 
@@ -93,28 +93,42 @@ def get_disparity_points(calib_dir, data_dir, frame, color=False):
     return points, disps
 
 
-def lin_interp(shape, ij_points, values):
+def lin_interp(shape, points_ij, values):
     from scipy.interpolate import LinearNDInterpolator
 
     m, n = shape
-    f = LinearNDInterpolator(ij_points, values, fill_value=0)
+    f = LinearNDInterpolator(points_ij, values, fill_value=0)
     J, I = np.meshgrid(np.arange(n), np.arange(m))
     IJ = np.vstack([I.flatten(), J.flatten()]).T
     disparity = f(IJ).reshape(shape)
     return disparity
 
 
-def lstsq_interp(shape, ij_points, values, lamb=1):
+def lstsq_interp(shape, points_ij, values, lamb=1, maxiter=None, valid=True):
     import scipy.sparse
     import scipy.sparse.linalg
 
+    if valid:
+        # clip out the valid region, and call recursively
+        I, J = points_ij.T
+        i0, i1, j0, j1 = I.min(), I.max(), J.min(), J.max()
+        subpoints = np.array([I - i0, J - j0]).T
+
+        output = -np.ones(shape)
+        suboutput = output[i0:i1+1, j0:j1+1]
+        subshape = suboutput.shape
+
+        suboutput[:] = lstsq_interp(subshape, subpoints, values,
+                                    lamb=lamb, maxiter=maxiter, valid=False)
+        return output
+
     n_pixels = np.prod(shape)
-    n_points = ij_points.shape[0]
-    assert ij_points.ndim == 2 and ij_points.shape[1] == 2
+    n_points = points_ij.shape[0]
+    assert points_ij.ndim == 2 and points_ij.shape[1] == 2
 
     Cmask = np.zeros(shape, dtype=bool)
     m = np.zeros(shape)
-    for [i, j], v in zip(ij_points, values):
+    for [i, j], v in zip(points_ij, values):
         Cmask[i, j] = 1
         m[i, j] = v
 
@@ -147,9 +161,36 @@ def lstsq_interp(shape, ij_points, values, lamb=1):
         (n_pixels, n_pixels), matvec=calcAA, dtype=np.float)
 
     # x0 = np.zeros(shape)
-    x0 = lin_interp(shape, ij_points, values)
+    x0 = lin_interp(shape, points_ij, values)
 
-    # x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten(), maxiter=100)
-    x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten())
+    x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten(),
+                                     maxiter=maxiter)
 
     return x.reshape(shape)
+
+
+def create_disparity_video(drive, color=False, **kwargs):
+    import scipy.misc
+    from kitti.raw import get_disp_dir
+
+    disp_dir = get_disp_dir(drive, **kwargs)
+    if os.path.exists(disp_dir):
+        raise RuntimeError("Target directory already exists. "
+                           "Please delete '%s' and re-run." % disp_dir)
+
+    calib_dir = get_calib_dir(**kwargs)
+    velodyne_dir = get_velodyne_dir(drive, **kwargs)
+    inds = get_inds(velodyne_dir, ext='.bin')
+
+    os.makedirs(disp_dir)
+    for i in inds:
+        points, disps = get_disparity_points(
+            calib_dir, velodyne_dir, i, color=color)
+        disp = lstsq_interp(image_shape, points, disps)
+
+        disp[disp < 0] = 0
+        disp = disp.astype('uint8')
+
+        path = os.path.join(disp_dir, '%010d.png' % i)
+        scipy.misc.imsave(path, disp)
+        print "Created disp image %d" % i
