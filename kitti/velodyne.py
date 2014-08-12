@@ -2,9 +2,8 @@ import os
 
 import numpy as np
 
-from kitti.data import get_drive_dir, get_calib_dir, get_inds
-
-image_shape = 375, 1242
+from kitti.data import (get_drive_dir, get_calib_dir, get_inds,
+                        image_shape, read_calib_file)
 
 
 def get_velodyne_dir(drive, **kwargs):
@@ -12,49 +11,66 @@ def get_velodyne_dir(drive, **kwargs):
     return os.path.join(drive_dir, 'velodyne_points', 'data')
 
 
-def read_calib_file(path):
-    float_chars = set("0123456789.e+- ")
+# def get_velo2cam(velo2cam):
 
-    data = {}
-    with open(path, 'r') as f:
-        for line in f.readlines():
-            key, value = line.split(':', 1)
-            value = value.strip()
-            data[key] = value
-            if float_chars.issuperset(value):
-                # try to cast to float array
-                try:
-                    data[key] = np.array(map(float, value.split(' ')))
-                except ValueError:
-                    pass  # casting error: data[key] already eq. value, so pass
-
-    return data
+#     Tr_velo2cam = np.eye(4)
+#     Tr_velo2cam[:3, :3] = rigid['R'].reshape(3, 3)
+#     Tr_velo2cam[:3, 3] = rigid['T']
 
 
-def get_disparity_points(calib_dir, data_dir, frame, color=False):
+# def get_velo2cam(calib_dir):
+#     velo2cam = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
+
+#     RT_velo2cam = np.eye(4)
+#     RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
+#     RT_velo2cam[:3, 3] = velo2cam['T']
+#     return RT_velo2cam
+
+
+def get_velo2rect(velo2cam, cam2cam):
+    RT_velo2cam = np.eye(4)
+    RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
+    RT_velo2cam[:3, 3] = velo2cam['T']
+
+    R_rect00 = np.eye(4)
+    R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
+
+    # RT_velo2rect = np.dot(RT_velo2cam, R_rect00)
+    RT_velo2rect = np.dot(R_rect00, RT_velo2cam)
+    return RT_velo2rect
+
+
+def get_velodyne_points(velodyne_dir, frame):
+    points_path = os.path.join(velodyne_dir, "%010d.bin" % frame)
+    points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
+    points = points[:, :3]  # exclude luminance
+    return points
+
+
+def get_disparity_points(calib_dir, velodyne_dir, frame, color=False):
 
     cam0, cam1 = (0, 1) if not color else (2, 3)
 
     # read calibration data
     cam2cam = read_calib_file(os.path.join(calib_dir, "calib_cam_to_cam.txt"))
-    rigid = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
+    velo2cam = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
 
-    Tr_velo2cam = np.eye(4)
-    Tr_velo2cam[:3, :3] = rigid['R'].reshape(3, 3)
-    Tr_velo2cam[:3, 3] = rigid['T']
+    RT_velo2cam = np.eye(4)
+    RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
+    RT_velo2cam[:3, 3] = velo2cam['T']
 
     R_rect00 = np.eye(4)
     R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
 
     def get_cam_transform(cam):
         P = cam2cam['P_rect_%02d' % cam].reshape(3, 4)
-        return np.dot(P, np.dot(R_rect00, Tr_velo2cam))
+        return np.dot(P, np.dot(R_rect00, RT_velo2cam))
 
     P_velo2img0 = get_cam_transform(cam0)
     P_velo2img1 = get_cam_transform(cam1)
 
     # read velodyne points
-    points_path = os.path.join(data_dir, "%010d.bin" % frame)
+    points_path = os.path.join(velodyne_dir, "%010d.bin" % frame)
     points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
     points = points[:, :3]  # exclude luminance
 

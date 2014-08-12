@@ -46,7 +46,7 @@ def get_video_odometry(oxts_path, indices, ext='.txt'):
 
 
 def odometry_to_positions(odometry):
-    lat, lon, alt = odometry.T[:3]
+    lat, lon, alt, roll, pitch, yaw = odometry.T[:6]
 
     R = 6378137  # Earth's radius in metres
 
@@ -63,7 +63,31 @@ def odometry_to_positions(odometry):
         my = R * lat
 
     times = odometry.T[-1]
-    return np.vstack([mx, my, alt, times]).T
+    return np.vstack([mx, my, alt, roll, pitch, yaw, times]).T
+
+
+def get_position_transform(pos0, pos1, invert=False):
+    def rot3d(axis, angle):
+        ei = np.ones(3, dtype='bool')
+        ei[axis] = 0
+        i = np.nonzero(ei)[0]
+        m = np.eye(3)
+        c, s = np.cos(angle), np.sin(angle)
+        m[i[0], i[0]] = c; m[i[0], i[1]] = -s
+        m[i[1], i[0]] = s; m[i[1], i[1]] = c
+        return m
+
+    def pos_transform(pos):
+        x, y, z, rx, ry, rz, _ = pos
+        RT = np.eye(4)
+        RT[:3,:3] = np.dot(np.dot(rot3d(0, rx), rot3d(1, ry)), rot3d(2, rz))
+        RT[:3,3] = [x, y, z]
+        return RT
+
+    T0 = pos_transform(pos0)
+    T1 = pos_transform(pos1)
+    return (np.dot(T1, np.linalg.inv(T0)).T if not invert else
+            np.dot(np.linalg.inv(T1), T0).T)
 
 
 def load_video(drive, **kwargs):
