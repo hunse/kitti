@@ -1,8 +1,19 @@
 kitti
 =====
 
-Tools for working with the KITTI dataset in Python
+Tools for working with the KITTI dataset in Python.
 
+License
+-------
+
+The majority of this project is available under the MIT license. The files in
+`kitti/bp` are a notable exception, being a modified version of
+Pedro F. Felzenszwalb and Daniel P. Huttenlocher's belief propogation code [1]
+licensed under the GNU GPL v2. These files are not essential to any part of the
+rest of the project, and are only used to run the optional belief propogation
+disparity image interpolation.
+
+[1]: http://cs.brown.edu/~pff/bp/
 
 Setup
 -----

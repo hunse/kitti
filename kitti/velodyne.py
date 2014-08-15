@@ -2,8 +2,7 @@ import os
 
 import numpy as np
 
-from kitti.data import (get_drive_dir, get_calib_dir, get_inds,
-                        image_shape, read_calib_file)
+from kitti.data import get_drive_dir, Calib, get_inds, image_shape
 
 
 def get_velodyne_dir(drive, **kwargs):
@@ -11,142 +10,70 @@ def get_velodyne_dir(drive, **kwargs):
     return os.path.join(drive_dir, 'velodyne_points', 'data')
 
 
-# def get_velo2cam(velo2cam):
-
-#     Tr_velo2cam = np.eye(4)
-#     Tr_velo2cam[:3, :3] = rigid['R'].reshape(3, 3)
-#     Tr_velo2cam[:3, 3] = rigid['T']
-
-
-# def get_velo2cam(calib_dir):
-#     velo2cam = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
-
-#     RT_velo2cam = np.eye(4)
-#     RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
-#     RT_velo2cam[:3, 3] = velo2cam['T']
-#     return RT_velo2cam
-
-
-def get_velo2rect(velo2cam, cam2cam):
-    RT_velo2cam = np.eye(4)
-    RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
-    RT_velo2cam[:3, 3] = velo2cam['T']
-
-    R_rect00 = np.eye(4)
-    R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
-
-    # RT_velo2rect = np.dot(RT_velo2cam, R_rect00)
-    RT_velo2rect = np.dot(R_rect00, RT_velo2cam)
-    return RT_velo2rect
-
-
-def get_velodyne_points(velodyne_dir, frame):
+def load_velodyne_points(drive, frame, **kwargs):
+    velodyne_dir = get_velodyne_dir(drive, **kwargs)
     points_path = os.path.join(velodyne_dir, "%010d.bin" % frame)
     points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
     points = points[:, :3]  # exclude luminance
     return points
 
 
-def get_disparity_points(calib_dir, velodyne_dir, frame, color=False):
+def load_disparity_points(drive, frame, color=False, **kwargs):
 
-    cam0, cam1 = (0, 1) if not color else (2, 3)
-
-    # read calibration data
-    cam2cam = read_calib_file(os.path.join(calib_dir, "calib_cam_to_cam.txt"))
-    velo2cam = read_calib_file(os.path.join(calib_dir, "calib_velo_to_cam.txt"))
-
-    RT_velo2cam = np.eye(4)
-    RT_velo2cam[:3, :3] = velo2cam['R'].reshape(3, 3)
-    RT_velo2cam[:3, 3] = velo2cam['T']
-
-    R_rect00 = np.eye(4)
-    R_rect00[:3, :3] = cam2cam['R_rect_00'].reshape(3, 3)
-
-    def get_cam_transform(cam):
-        P = cam2cam['P_rect_%02d' % cam].reshape(3, 4)
-        return np.dot(P, np.dot(R_rect00, RT_velo2cam))
-
-    P_velo2img0 = get_cam_transform(cam0)
-    P_velo2img1 = get_cam_transform(cam1)
+    calib = Calib(color=color, **kwargs)
 
     # read velodyne points
-    points_path = os.path.join(velodyne_dir, "%010d.bin" % frame)
-    points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 4)
-    points = points[:, :3]  # exclude luminance
+    points = load_velodyne_points(drive, frame, **kwargs)
 
     # remove all points behind image plane (approximation)
     points = points[points[:, 0] >= 5, :]
 
     # convert points to each camera
-    def project(points, T):
-        dim_norm, dim_proj = T.shape
-
-        # do transformation in homogeneous coordinates
-        if points.shape[1] < dim_proj:
-            points = np.hstack([points, np.ones((points.shape[0], 1))])
-
-        new_points = np.dot(points, T.T)
-
-        # normalize homogeneous coordinates
-        new_points = new_points[:, :dim_norm-1] / new_points[:, [dim_norm-1]]
-        return new_points
-
-    points0 = project(points, P_velo2img0)
-    points1 = project(points, P_velo2img1)
-    diff = points0 - points1
-    assert (np.abs(diff[:, 1]) < 0.5).all()  # assert all y-coordinates close
-
-    points = points0[:, ::-1]  # points in left image, flip to (i, j) format
-    disps = diff[:, 0]
+    xyd = calib.velo2disp(points)
 
     # take only points that fall in the first image
-    mask = ((points[:, 0] >= 0) & (points[:, 0] <= image_shape[0] - 1) &
-            (points[:, 1] >= 0) & (points[:, 1] <= image_shape[1] - 1) &
-            (disps >= 0) & (disps <= 255))
+    xyd = calib.filter_disps(xyd)
 
-    points = points[mask]
-    disps = disps[mask]
-    return points, disps
+    return xyd
 
 
-def lin_interp(shape, points_ij, values):
+def lin_interp(shape, xyd):
     from scipy.interpolate import LinearNDInterpolator
 
     m, n = shape
-    f = LinearNDInterpolator(points_ij, values, fill_value=0)
+    ij, d = xyd[:, 1::-1], xyd[:, 2]
+    f = LinearNDInterpolator(ij, d, fill_value=0)
     J, I = np.meshgrid(np.arange(n), np.arange(m))
     IJ = np.vstack([I.flatten(), J.flatten()]).T
     disparity = f(IJ).reshape(shape)
     return disparity
 
 
-def lstsq_interp(shape, points_ij, values, lamb=1, maxiter=None, valid=True):
+def lstsq_interp(shape, xyd, lamb=1, maxiter=None, valid=True):
     import scipy.sparse
     import scipy.sparse.linalg
 
+    assert xyd.ndim == 2 and xyd.shape[1] == 3
+
     if valid:
         # clip out the valid region, and call recursively
-        I, J = points_ij.T
-        i0, i1, j0, j1 = I.min(), I.max(), J.min(), J.max()
-        subpoints = np.array([I - i0, J - j0]).T
+        j, i, d = xyd.T
+        i0, i1, j0, j1 = i.min(), i.max(), j.min(), j.max()
+        subpoints = xyd - [[j0, i0, 0]]
 
         output = -np.ones(shape)
         suboutput = output[i0:i1+1, j0:j1+1]
         subshape = suboutput.shape
 
-        suboutput[:] = lstsq_interp(subshape, subpoints, values,
+        suboutput[:] = lstsq_interp(subshape, subpoints,
                                     lamb=lamb, maxiter=maxiter, valid=False)
         return output
 
-    n_pixels = np.prod(shape)
-    n_points = points_ij.shape[0]
-    assert points_ij.ndim == 2 and points_ij.shape[1] == 2
-
     Cmask = np.zeros(shape, dtype=bool)
     m = np.zeros(shape)
-    for [i, j], v in zip(points_ij, values):
+    for j, i, d in xyd:
         Cmask[i, j] = 1
-        m[i, j] = v
+        m[i, j] = d
 
     def calcAA(x):
         x = x.reshape(shape)
@@ -173,16 +100,53 @@ def lstsq_interp(shape, points_ij, values, lamb=1, maxiter=None, valid=True):
 
         return y.flatten()
 
+    n_pixels = np.prod(shape)
     G = scipy.sparse.linalg.LinearOperator(
         (n_pixels, n_pixels), matvec=calcAA, dtype=np.float)
 
     # x0 = np.zeros(shape)
-    x0 = lin_interp(shape, points_ij, values)
+    x0 = lin_interp(shape, xyd)
 
     x, info = scipy.sparse.linalg.cg(G, m.flatten(), x0=x0.flatten(),
                                      maxiter=maxiter)
 
     return x.reshape(shape)
+
+
+def bp_interp(image_shape, xyd):
+    from kitti.bp import interp
+
+    seed = np.zeros(image_shape, dtype='uint8')
+    for x, y, d in np.round(xyd):
+        seed[y, x] = d
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(101)
+    # plt.hist(seed.flatten(), bins=30)
+    # # plt.imshow(seed)
+    # plt.show()
+
+    # disp = interp(seed, values=seed.max(), seed_weight=1000, seed_max=10000)
+    disp = interp(seed, values=seed.max(), seed_weight=10, disc_max=5)
+
+    return disp
+
+
+def bp_stereo_interp(img0, img1, xyd):
+    from kitti.bp import stereo
+
+    assert img0.shape == img1.shape
+
+    seed = np.zeros(img0.shape, dtype='uint8')
+    for x, y, d in np.round(xyd):
+        seed[y, x] = d
+
+    params = dict(values=seed.max(), levels=6, min_level=1,
+                  disc_max=30, seed_weight=1, data_weight=0.01, data_max=100)
+    # disp = stereo(img0, img1, seed, values=128,
+    disp = stereo(img0, img1, seed, **params)
+
+    return disp
 
 
 def create_disparity_video(drive, color=False, **kwargs):

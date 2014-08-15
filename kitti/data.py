@@ -49,7 +49,7 @@ def homogeneous_transform(points, transform):
         The points to transform. If `points` is shape (n_points, M-1), a unit
         homogeneous coordinate will be added to make it (n_points, M).
     transform : (M, N) array-like
-        The transformation to apply.
+        The right-multiplying transformation to apply.
     """
     points = np.asarray(points)
     transform = np.asarray(transform)
@@ -71,6 +71,17 @@ def homogeneous_transform(points, transform):
 
 
 class Calib(object):
+    """Convert between coordinate frames.
+
+    This class loads the calibration data from file, and creates the
+    corresponding transformations to convert between various coordinate
+    frames.
+
+    Each `get_*` function returns a 3D transformation in homogeneous
+    coordinates between two frames. All transformations are right-multiplying,
+    and can be applied with `homogeneous_transform`.
+    """
+
     def __init__(self, date='2011_09_26', color=False):
         self.calib_dir = get_calib_dir(date=date)
         self.imu2velo = read_calib_file(
@@ -117,26 +128,17 @@ class Calib(object):
     def get_imu2disp(self):
         return np.dot(self.get_imu2rect(), self.get_rect2disp())
 
+    def get_velo2disp(self):
+        return np.dot(self.get_velo2rect(), self.get_rect2disp())
+
     def get_disp2rect(self):
         return np.linalg.inv(self.get_rect2disp())
 
     def get_disp2imu(self):
         return np.linalg.inv(self.get_imu2disp())
 
-    def rect2disp(self, points, valid=True):
-        T = self.get_rect2disp()
-        xyd = homogeneous_transform(points, T)
-
-        if valid:
-            # only take points that fall in the reference image
-            x, y, d = xyd.T
-            mask = ((x >= 0) & (x <= image_shape[1] - 1) &
-                    (y >= 0) & (y <= image_shape[0] - 1) &
-                    (d >= 0) & (d <= 255))
-            xyd = xyd[mask]
-            return xyd, mask
-        else:
-            return xyd
+    def rect2disp(self, points):
+        return homogeneous_transform(points, self.get_rect2disp())
 
     def disp2rect(self, xyd):
         return homogeneous_transform(xyd, self.get_disp2rect())
@@ -144,12 +146,22 @@ class Calib(object):
     def velo2rect(self, points):
         return homogeneous_transform(points, self.get_velo2rect())
 
+    def velo2disp(self, points):
+        return homogeneous_transform(points, self.get_velo2disp())
+
     def imu2rect(self, points):
         return homogeneous_transform(points, self.get_imu2rect())
 
     def rect2imu(self, points):
         return homogeneous_transform(points, self.get_rect2imu())
 
+    def filter_disps(self, xyd, return_mask=False):
+        x, y, d = xyd.T
+        mask = ((x >= 0) & (x <= image_shape[1] - 1) &
+                (y >= 0) & (y <= image_shape[0] - 1) &
+                (d >= 0) & (d <= 255))
+        xyd = xyd[mask]
+        return (xyd, mask) if return_mask else xyd
 
 
 # TODO: functions to automatically download data
