@@ -70,6 +70,15 @@ def homogeneous_transform(points, transform):
     return new_points
 
 
+def filter_disps(xyd, shape, max_disp=255, return_mask=False):
+    x, y, d = xyd.T
+    mask = ((x >= 0) & (x <= shape[1] - 1) &
+            (y >= 0) & (y <= shape[0] - 1) &
+            (d >= 0) & (d <= max_disp))
+    xyd = xyd[mask]
+    return (xyd, mask) if return_mask else xyd
+
+
 class Calib(object):
     """Convert between coordinate frames.
 
@@ -155,13 +164,9 @@ class Calib(object):
     def rect2imu(self, points):
         return homogeneous_transform(points, self.get_rect2imu())
 
-    def filter_disps(self, xyd, return_mask=False):
-        x, y, d = xyd.T
-        mask = ((x >= 0) & (x <= image_shape[1] - 1) &
-                (y >= 0) & (y <= image_shape[0] - 1) &
-                (d >= 0) & (d <= 255))
-        xyd = xyd[mask]
-        return (xyd, mask) if return_mask else xyd
+    def filter_disps(self, xyd, max_disp=255, return_mask=False):
+        return filter_disps(
+            xyd, image_shape, max_disp=max_disp, return_mask=return_mask)
 
 
 # TODO: functions to automatically download data

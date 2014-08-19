@@ -44,3 +44,13 @@ examples use drive 11, but it should be easy to modify them to use a drive of
 your choice.
 
 Happy hacking!
+
+Cython setup
+------------
+
+The belief propagation module uses Cython to connect to the C++ BP code. To
+build the Cython module, run
+
+    python setup.py build_ext --inplace
+
+This should create the file ``module.so`` in ``kitti/bp``.
