@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 
-from kitti.data import get_drive_dir, Calib, get_inds, image_shape
+from kitti.data import get_drive_dir, Calib, get_inds, image_shape, get_calib_dir
 
 
 def get_velodyne_dir(drive, **kwargs):
@@ -26,7 +26,7 @@ def load_disparity_points(drive, frame, color=False, **kwargs):
     points = load_velodyne_points(drive, frame, **kwargs)
 
     # remove all points behind image plane (approximation)
-    points = points[points[:, 0] >= 5, :]
+    points = points[points[:, 0] >= 1, :]
 
     # convert points to each camera
     xyd = calib.velo2disp(points)

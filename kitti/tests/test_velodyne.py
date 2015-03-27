@@ -9,7 +9,7 @@ from kitti.velodyne import (
 
 
 def test_load_disparity_points(drive=11, frame=0):
-    xyd = load_disparity_points(drive, frame, color=False)
+    xyd = load_disparity_points(drive, frame, color=True)
     disp = np.zeros(image_shape, dtype=np.uint8)
     for x, y, d in np.round(xyd):
         disp[y, x] = d
@@ -23,7 +23,7 @@ def test_load_disparity_points(drive=11, frame=0):
 def test_disparity_with_bm(drive=11, frame=0):
     import cv2
 
-    xyd = load_disparity_points(drive, frame, color=False)
+    xyd = load_disparity_points(drive, frame, color=True)
     disp = np.zeros(image_shape, dtype=np.uint8)
     for x, y, d in np.round(xyd):
         disp[y, x] = d
@@ -103,7 +103,7 @@ def test_interp(drive=11, frame=0):
     plt.show()
 
 
-def test_bp_interp(drive=11, frame=150):
+def test_bp_interp(drive=11, frame=0):
     xyd = load_disparity_points(drive, frame, color=False)
 
     disp = np.zeros(image_shape)
@@ -129,7 +129,7 @@ def test_bp_interp(drive=11, frame=150):
 
 
 if __name__ == '__main__':
-    # test_load_disparity_points()
+    test_load_disparity_points()
     # test_disparity_with_bm()
     # test_interp()
-    test_bp_interp()
+    # test_bp_interp()

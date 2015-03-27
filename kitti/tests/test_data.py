@@ -12,7 +12,7 @@ def test_disp2rect():
 
     drive = 11
     frame = 0
-    color = False
+    color = True
 
     img0, img1 = load_stereo_frame(drive, frame, color=color)
 
@@ -45,7 +45,7 @@ def test_disp2rect():
         plt.imshow(img0, cmap='gray')
         plt.subplot(212)
         plt.imshow(disp)
-        # plt.show()
+        plt.show()
 
         # assert False
 
