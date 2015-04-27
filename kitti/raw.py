@@ -1,7 +1,9 @@
 import os
+import re
+
 import numpy as np
 
-from kitti.data import get_drive_dir, get_inds
+from kitti.data import data_dir, get_drive_dir, get_inds
 
 
 def get_video_dir(drive, color=False, right=False, **kwargs):
@@ -13,6 +15,22 @@ def get_video_dir(drive, color=False, right=False, **kwargs):
 def get_disp_dir(drive, color=False, **kwargs):
     drive_dir = get_drive_dir(drive, **kwargs)
     return os.path.join(drive_dir, 'disp_' + ('23' if color else '01'), 'data')
+
+
+def get_drive_inds(date='2011_09_26'):
+    date_dir = os.path.join(data_dir, date)
+
+    inds = []
+    for obj in os.listdir(date_dir):
+        match = re.match("%s_drive_([0-9]{4})_sync" % date, obj)
+        if match is not None:
+            inds.append(int(match.groups()[0]))
+
+    return sorted(inds)
+
+
+def get_frame_inds(drive, **kwargs):
+    return get_inds(get_video_dir(drive, **kwargs))
 
 
 def get_video_images(path, indices, ext='.png'):
